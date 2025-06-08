@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from st_supabase_connection import SupabaseConnection
+from supabase import create_client
 
 # Page config
 st.set_page_config(
@@ -11,7 +11,13 @@ st.set_page_config(
 )
 
 # Initialize connection to Supabase
-conn = st.connection("supabase", type=SupabaseConnection)
+@st.cache_resource
+def init_connection():
+    url = st.secrets["connections"]["supabase"]["url"]
+    key = st.secrets["connections"]["supabase"]["key"]
+    return create_client(url, key)
+
+supabase = init_connection()
 
 # Title and description
 st.title("Danish Superliga Analytics Dashboard")
@@ -27,18 +33,18 @@ season = st.sidebar.selectbox("Season", ["2024-2025"])
 # Get data from Supabase
 @st.cache_data(ttl=3600)
 def load_matches():
-    response = conn.query("matches", "SELECT * FROM matches WHERE season = '2024-2025'").execute()
-    return pd.DataFrame(response.data)
+    response = supabase.table("matches").select("*").eq("season", "2024-2025").execute()
+    return pd.DataFrame(response.data) if response.data else pd.DataFrame()
 
 @st.cache_data(ttl=3600)
 def load_teams():
-    response = conn.query("teams", "SELECT * FROM teams").execute()
-    return pd.DataFrame(response.data)
+    response = supabase.table("teams").select("*").execute()
+    return pd.DataFrame(response.data) if response.data else pd.DataFrame()
 
 @st.cache_data(ttl=3600)
 def load_events():
-    response = conn.query("events", "SELECT * FROM events").execute()
-    return pd.DataFrame(response.data)
+    response = supabase.table("events").select("*").execute()
+    return pd.DataFrame(response.data) if response.data else pd.DataFrame()
 
 try:
     matches_df = load_matches()
@@ -51,59 +57,50 @@ try:
     with tab1:
         st.header("League Overview")
         
-        # League table
-        if not matches_df.empty:
-            # Calculate points and create league table
-            league_table = pd.DataFrame()
-            # Add league table calculation logic here
+        if matches_df.empty:
+            st.info("No match data available yet. Data will be populated once the scraper runs.")
+        else:
+            # League table
             st.subheader("League Table")
-            st.dataframe(league_table)
+            st.dataframe(matches_df)
             
             # Recent matches
             st.subheader("Recent Matches")
             recent_matches = matches_df.sort_values("match_date", ascending=False).head(5)
             st.dataframe(recent_matches)
-            
-            # Goals per match trend
-            st.subheader("Goals per Match Trend")
-            # Add goals trend visualization here using plotly
 
     with tab2:
         st.header("Team Analysis")
         
-        # Team selector
-        selected_team = st.selectbox("Select Team", teams_df["name"].unique())
-        
-        # Team stats
-        if selected_team:
-            team_matches = matches_df[
-                (matches_df["home_team_id"] == selected_team) |
-                (matches_df["away_team_id"] == selected_team)
-            ]
+        if teams_df.empty:
+            st.info("No team data available yet. Data will be populated once the scraper runs.")
+        else:
+            # Team selector
+            selected_team = st.selectbox("Select Team", teams_df["name"].unique())
             
-            # Display team stats
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Matches Played", len(team_matches))
-            # Add more team metrics
-            
-            # Team form chart
-            st.subheader("Team Form")
-            # Add form visualization here
+            # Team stats
+            if selected_team:
+                team_matches = matches_df[
+                    (matches_df["home_team_id"] == selected_team) |
+                    (matches_df["away_team_id"] == selected_team)
+                ]
+                
+                # Display team stats
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Matches Played", len(team_matches))
 
     with tab3:
         st.header("Player Stats")
         
-        # Top scorers
-        st.subheader("Top Scorers")
-        # Add top scorers table and chart
-        
-        # Player search and detailed stats
-        player_name = st.text_input("Search Player")
-        if player_name:
-            # Add player stats display logic here
-            pass
+        if events_df.empty:
+            st.info("No player data available yet. Data will be populated once the scraper runs.")
+        else:
+            # Player search and detailed stats
+            player_name = st.text_input("Search Player")
+            if player_name:
+                st.info("Player search functionality coming soon!")
 
 except Exception as e:
-    st.error(f"Error loading data: {str(e)}")
-    st.info("Please make sure your Supabase connection is properly configured in .streamlit/secrets.toml") 
+    st.error(f"Error connecting to database: {str(e)}")
+    st.info("Please check your database connection settings.") 
